@@ -21,7 +21,13 @@ const io = new Server(server, {
   },
 });
 app.use(express.json());
-app.use(cors());
+app.use(
+  cors({
+    origin: ["http://localhost:5173", "https://e-shop-woad-one.vercel.app"],
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true,
+  })
+);
 
 // Serve static assets (images)
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
@@ -68,15 +74,26 @@ io.on("connection", (socket) => {
   });
 
   // Multi-recipient: toUserIds array
-  socket.on("send_message_multi", ({ toUserIds, message, product, fromUserId }) => {
-    const normalizedProduct = product
-      ? { _id: product._id || undefined, name: product.name, image: product.image, price: product.price }
-      : null;
-    if (!Array.isArray(toUserIds) || !toUserIds.length) return;
-    Promise.all(
-      toUserIds.map((toUserId) =>
-        Message.create({ fromUser: fromUserId, toUser: toUserId, text: message || "", product: normalizedProduct })
-          .then((saved) => {
+  socket.on(
+    "send_message_multi",
+    ({ toUserIds, message, product, fromUserId }) => {
+      const normalizedProduct = product
+        ? {
+            _id: product._id || undefined,
+            name: product.name,
+            image: product.image,
+            price: product.price,
+          }
+        : null;
+      if (!Array.isArray(toUserIds) || !toUserIds.length) return;
+      Promise.all(
+        toUserIds.map((toUserId) =>
+          Message.create({
+            fromUser: fromUserId,
+            toUser: toUserId,
+            text: message || "",
+            product: normalizedProduct,
+          }).then((saved) => {
             const toSocket = onlineUsers.get(toUserId);
             const payload = {
               fromUserId,
@@ -87,11 +104,18 @@ io.on("connection", (socket) => {
             if (toSocket) io.to(toSocket).emit("receive_message", payload);
             return true;
           })
-      )
-    ).catch(() => {});
-    const fromSocket = onlineUsers.get(fromUserId);
-    if (fromSocket) io.to(fromSocket).emit("message_saved", { fromUserId, message, product: normalizedProduct, timestamp: Date.now() });
-  });
+        )
+      ).catch(() => {});
+      const fromSocket = onlineUsers.get(fromUserId);
+      if (fromSocket)
+        io.to(fromSocket).emit("message_saved", {
+          fromUserId,
+          message,
+          product: normalizedProduct,
+          timestamp: Date.now(),
+        });
+    }
+  );
 
   socket.on("disconnect", () => {
     for (const [uid, sid] of onlineUsers.entries()) {
